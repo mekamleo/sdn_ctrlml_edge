@@ -1,0 +1,47 @@
+services:
+
+  ryu1:
+    build:
+      context: ./ryu
+    container_name: ryu1
+    environment:
+      PACKET_IN_STRESS: "${PACKET_IN_STRESS:-0}"
+    command: ryu-manager --ofp-tcp-listen-port 6653 monitored_switch
+    ports:
+      - "6653:6653"
+    networks:
+      - sdn-net
+
+  ryu2:
+    build:
+      context: ./ryu
+    container_name: ryu2
+    command: ryu-manager --ofp-tcp-listen-port 6654 monitored_switch
+    ports:
+      - "6654:6654"
+    networks:
+      - sdn-net
+
+  ryu3:
+    build:
+      context: ./ryu
+    container_name: ryu3
+    command: ryu-manager --ofp-tcp-listen-port 6655 monitored_switch
+    ports:
+      - "6655:6655"
+    networks:
+      - sdn-net
+
+  ryu4:
+    build:
+      context: ./ryu
+    container_name: ryu4
+    command: ryu-manager --ofp-tcp-listen-port 6656 monitored_switch
+    ports:
+      - "6656:6656"
+    networks:
+      - sdn-net
+
+networks:
+  sdn-net:
+    driver: bridge

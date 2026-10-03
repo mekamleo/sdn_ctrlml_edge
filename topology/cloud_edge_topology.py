@@ -1,0 +1,1136 @@
+import os
+import time
+import sys
+import subprocess
+
+from mininet.net import Mininet
+from mininet.node import RemoteController, OVSSwitch
+from mininet.cli import CLI
+from mininet.log import setLogLevel, info
+from mininet.link import TCLink
+
+
+# ============================================================
+# CHEMINS DU PROJET
+# ============================================================
+
+PROJECT_ROOT = os.path.dirname(
+    os.path.dirname(os.path.abspath(__file__))
+)
+
+STRATEGIES_DIR = os.path.join(
+    PROJECT_ROOT,
+    "strategies"
+)
+
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
+if STRATEGIES_DIR not in sys.path:
+    sys.path.insert(0, STRATEGIES_DIR)
+
+
+# ============================================================
+# STRATEGIES
+# ============================================================
+
+from round_robin import DomainRoundRobin
+from weighted_round_robin import DomainWeightedRoundRobin
+from sdn_ctrlml import SDNCTRLML
+from sdn_ctrlml_edge import SDNCTRLMLEdge, DomainSDNCTRLMLEdge
+
+
+# ============================================================
+# CREATION DE LA TOPOLOGIE
+# ============================================================
+
+def create_topology():
+
+    # --------------------------------------------------------
+    # Strategie choisie par variable d'environnement
+    # --------------------------------------------------------
+
+    strategy = os.environ.get(
+        "SDN_STRATEGY",
+        "round_robin"
+    )
+
+    info("\n")
+    info("====================================================\n")
+    info(" STRATEGIE : %s\n" % strategy)
+    info("====================================================\n")
+
+    # Permet de savoir si une expérimentation automatique
+    # a déjà été exécutée.
+    experiment_executed = False
+
+
+    # --------------------------------------------------------
+    # Creation du reseau Mininet
+    # --------------------------------------------------------
+
+    net = Mininet(
+        controller=None,
+        switch=OVSSwitch,
+        link=TCLink,
+        autoSetMacs=True
+    )
+
+
+    # ========================================================
+    # CONTROLEURS
+    # ========================================================
+
+    if strategy == "onos_static":
+
+        info("*** Mode ONOS mono-instance\n")
+
+        onos = net.addController(
+            "onos",
+            controller=RemoteController,
+            ip="127.0.0.1",
+            port=6653
+        )
+
+        controllers = {
+            "onos": onos
+        }
+
+    else:
+
+        info("*** Mode multi-controleurs Ryu\n")
+
+        ryu1 = net.addController(
+            "ryu1",
+            controller=RemoteController,
+            ip="127.0.0.1",
+            port=6653
+        )
+
+        ryu2 = net.addController(
+            "ryu2",
+            controller=RemoteController,
+            ip="127.0.0.1",
+            port=6654
+        )
+
+        ryu3 = net.addController(
+            "ryu3",
+            controller=RemoteController,
+            ip="127.0.0.1",
+            port=6655
+        )
+
+        ryu4 = net.addController(
+            "ryu4",
+            controller=RemoteController,
+            ip="127.0.0.1",
+            port=6656
+        )
+
+        controllers = {
+            "ryu1": ryu1,
+            "ryu2": ryu2,
+            "ryu3": ryu3,
+            "ryu4": ryu4
+        }
+
+
+    # ========================================================
+    # SWITCHES
+    # ========================================================
+
+    s1 = net.addSwitch(
+        "s1",
+        protocols="OpenFlow13"
+    )
+
+    s2 = net.addSwitch(
+        "s2",
+        protocols="OpenFlow13"
+    )
+
+    s3 = net.addSwitch(
+        "s3",
+        protocols="OpenFlow13"
+    )
+
+    s4 = net.addSwitch(
+        "s4",
+        protocols="OpenFlow13"
+    )
+
+    s5 = net.addSwitch(
+        "s5",
+        protocols="OpenFlow13"
+    )
+
+    s6 = net.addSwitch(
+        "s6",
+        protocols="OpenFlow13"
+    )
+
+
+    # ========================================================
+    # HOTES
+    # ========================================================
+
+    h1 = net.addHost("h1")
+    h2 = net.addHost("h2")
+
+    h3 = net.addHost("h3")
+    h4 = net.addHost("h4")
+
+    h5 = net.addHost("h5")
+    h6 = net.addHost("h6")
+
+    h7 = net.addHost("h7")
+    h8 = net.addHost("h8")
+
+    h9 = net.addHost("h9")
+    h10 = net.addHost("h10")
+
+    h11 = net.addHost("h11")
+    h12 = net.addHost("h12")
+
+
+    # ========================================================
+    # LIENS HOTES -> SWITCHES
+    # ========================================================
+
+    # -------------------------
+    # Domaine Edge 1
+    # -------------------------
+
+    net.addLink(
+        h1,
+        s1
+    )
+
+    net.addLink(
+        h2,
+        s1
+    )
+
+    net.addLink(
+        h3,
+        s2
+    )
+
+    net.addLink(
+        h4,
+        s2
+    )
+
+    net.addLink(
+        h5,
+        s3
+    )
+
+    net.addLink(
+        h6,
+        s3
+    )
+
+
+    # -------------------------
+    # Domaine Edge 2
+    # -------------------------
+
+    net.addLink(
+        h7,
+        s4
+    )
+
+    net.addLink(
+        h8,
+        s4
+    )
+
+    net.addLink(
+        h9,
+        s5
+    )
+
+    net.addLink(
+        h10,
+        s5
+    )
+
+    net.addLink(
+        h11,
+        s6
+    )
+
+    net.addLink(
+        h12,
+        s6
+    )
+
+
+    # ========================================================
+    # LIENS ENTRE SWITCHES
+    # ========================================================
+
+    info("*** Creation des liens Edge 1\n")
+
+    net.addLink(
+        s1,
+        s2
+    )
+
+    net.addLink(
+        s2,
+        s3
+    )
+
+
+    info("*** Creation du lien inter-domaine\n")
+
+    net.addLink(
+        s3,
+        s4
+    )
+
+
+    info("*** Creation des liens Edge 2\n")
+
+    net.addLink(
+        s4,
+        s5
+    )
+
+    net.addLink(
+        s5,
+        s6
+    )
+
+
+    # ========================================================
+    # CONSTRUCTION DU RESEAU
+    # ========================================================
+
+    info("*** Construction du reseau\n")
+
+    net.build()
+
+
+    # ========================================================
+    # DEMARRAGE DES CONTROLEURS
+    # ========================================================
+
+    info("*** Demarrage des controleurs\n")
+
+    if strategy == "onos_static":
+
+        onos.start()
+
+    else:
+
+        ryu1.start()
+        ryu2.start()
+        ryu3.start()
+        ryu4.start()
+
+
+    # ========================================================
+    # AFFECTATION DES SWITCHES
+    # ========================================================
+
+    if strategy == "onos_static":
+
+        # ----------------------------------------------------
+        # ONOS MONO-INSTANCE
+        # Tous les switches sont geres par ONOS.
+        # ----------------------------------------------------
+
+        info("*** Affectation des switches a ONOS\n")
+
+        s1.start([onos])
+        s2.start([onos])
+        s3.start([onos])
+        s4.start([onos])
+        s5.start([onos])
+        s6.start([onos])
+
+
+    else:
+
+        # ----------------------------------------------------
+        # Definition des domaines
+        # ----------------------------------------------------
+
+        domains = {
+            "edge1": [
+                "ryu1",
+                "ryu2"
+            ],
+            "edge2": [
+                "ryu3",
+                "ryu4"
+            ]
+        }
+
+
+        # ----------------------------------------------------
+        # Round Robin
+        # ----------------------------------------------------
+
+        if strategy == "round_robin":
+
+            scheduler = DomainRoundRobin(
+                domains
+            )
+
+            info("*** Affectation Round Robin\n")
+
+            assignment = {}
+
+            for switch_name in ["s1", "s2", "s3"]:
+
+                controller_name = scheduler.select_controller(
+                    "edge1"
+                )
+
+                assignment[switch_name] = controller_name
+
+
+            for switch_name in ["s4", "s5", "s6"]:
+
+                controller_name = scheduler.select_controller(
+                    "edge2"
+                )
+
+                assignment[switch_name] = controller_name
+
+
+        # ----------------------------------------------------
+        # Weighted Round Robin
+        # ----------------------------------------------------
+
+        elif strategy == "weighted_round_robin":
+
+            weighted_domains = {
+
+                "edge1": {
+                    "ryu1": 1,
+                    "ryu2": 2
+                },
+
+                "edge2": {
+                    "ryu3": 1,
+                    "ryu4": 2
+                }
+
+            }
+
+            scheduler = DomainWeightedRoundRobin(
+                weighted_domains
+            )
+
+            info("*** Affectation Weighted Round Robin\n")
+
+            assignment = {}
+
+            for switch_name in ["s1", "s2", "s3"]:
+
+                controller_name = scheduler.select_controller(
+                    "edge1"
+                )
+
+                assignment[switch_name] = controller_name
+
+
+            for switch_name in ["s4", "s5", "s6"]:
+
+                controller_name = scheduler.select_controller(
+                    "edge2"
+                )
+
+                assignment[switch_name] = controller_name
+
+
+        # ----------------------------------------------------
+        # SDN CTRLML
+        # ----------------------------------------------------
+
+        elif strategy == "sdn_ctrlml":
+
+            info(
+                "*** Affectation SDN_CTRLML avec K-means\n"
+            )
+
+            # ------------------------------------------------
+            # Un scheduler par domaine.
+            # Edge 1 : Ryu1 / Ryu2
+            # Edge 2 : Ryu3 / Ryu4
+            # ------------------------------------------------
+
+            edge1_scheduler = SDNCTRLML(
+                ["ryu1", "ryu2"],
+                n_clusters=2
+            )
+
+            edge2_scheduler = SDNCTRLML(
+                ["ryu3", "ryu4"],
+                n_clusters=2
+            )
+
+            assignment = {}
+
+            # ------------------------------------------------
+            # Edge 1
+            # ------------------------------------------------
+
+            info(
+                "*** SDN_CTRLML - Edge 1\n"
+            )
+
+            for switch_name in [
+                "s1",
+                "s2",
+                "s3"
+            ]:
+
+                controller_name, result = (
+                    edge1_scheduler.select_controller()
+                )
+
+                assignment[
+                    switch_name
+                ] = controller_name
+
+                info(
+                    "    %s -> %s\n"
+                    % (
+                        switch_name,
+                        controller_name
+                    )
+                )
+
+            # ------------------------------------------------
+            # Edge 2
+            # ------------------------------------------------
+
+            info(
+                "*** SDN_CTRLML - Edge 2\n"
+            )
+
+            for switch_name in [
+                "s4",
+                "s5",
+                "s6"
+            ]:
+
+                controller_name, result = (
+                    edge2_scheduler.select_controller()
+                )
+
+                assignment[
+                    switch_name
+                ] = controller_name
+
+                info(
+                    "    %s -> %s\n"
+                    % (
+                        switch_name,
+                        controller_name
+                    )
+                )
+
+
+        # ----------------------------------------------------
+        # SDN CTRLML-EDGE
+        # ----------------------------------------------------
+
+        elif strategy == "sdn_ctrlml_edge":
+
+            info(
+                "*** Calibration SDN_CTRLML-Edge\n"
+            )
+
+            from monitoring.experiment_round_robin import (
+                measure_latency,
+                measure_iperf,
+                get_controller_stats,
+                get_flows
+            )
+
+            calibration_assignment = {
+                "s1": "ryu1",
+                "s2": "ryu2",
+                "s3": "ryu1",
+                "s4": "ryu3",
+                "s5": "ryu4",
+                "s6": "ryu3"
+            }
+
+            info(
+                "*** Affectation temporaire de calibration\n"
+            )
+
+            for switch_name, controller_name in (
+                calibration_assignment.items()
+            ):
+
+                info(
+                    "    %s -> %s\n"
+                    % (
+                        switch_name,
+                        controller_name
+                    )
+                )
+
+                net.get(switch_name).start(
+                    [controllers[controller_name]]
+                )
+
+            time.sleep(3)
+
+            h1 = net["h1"]
+            h12 = net["h12"]
+
+            info(
+                "*** Mesure latence...\n"
+            )
+
+            latency = measure_latency(h1, h12)
+
+            if latency is None:
+                latency = 0.0
+
+            info(
+                "    Latence : %.3f ms\n"
+                % latency
+            )
+
+            info(
+                "*** Mesure debit...\n"
+            )
+
+            throughput = measure_iperf(h1, h12)
+
+            if throughput is None:
+                throughput = 0.0
+
+            info(
+                "    Debit : %.2f Mbps\n"
+                % throughput
+            )
+
+            controller_stats = get_controller_stats()
+
+            total_flows, flow_counts = get_flows()
+
+            controller_flows = {
+                "ryu1": 0,
+                "ryu2": 0,
+                "ryu3": 0,
+                "ryu4": 0
+            }
+
+            for switch_name, count in flow_counts.items():
+
+                controller_name = calibration_assignment.get(
+                    switch_name
+                )
+
+                if controller_name is not None:
+
+                    controller_flows[controller_name] += count
+
+            info(
+                "*** Metriques de calibration\n"
+            )
+
+            for controller_name in [
+                "ryu1",
+                "ryu2",
+                "ryu3",
+                "ryu4"
+            ]:
+
+                stats = controller_stats.get(
+                    controller_name,
+                    {
+                        "cpu": 0.0,
+                        "memory": 0.0
+                    }
+                )
+
+                info(
+                    "    %s : CPU=%.3f%% MEM=%.3f%% FLOWS=%d\n"
+                    % (
+                        controller_name,
+                        stats["cpu"],
+                        stats["memory"],
+                        controller_flows[controller_name]
+                    )
+                )
+
+            info(
+                "    Total flows : %d\n"
+                % total_flows
+            )
+
+           # for switch_name in [
+               # "s1",
+               # "s2",
+                #"s3",
+               # "s4",
+              #  "s5",
+             #   "s6"
+            #]:
+
+               # net.get(switch_name).stop()
+
+            # Réaffectation des contrôleurs sans arrêter les switches
+            time.sleep(2)
+
+            domains = {
+                "edge1": [
+                    "ryu1",
+                    "ryu2"
+                ],
+                "edge2": [
+                    "ryu3",
+                    "ryu4"
+                ]
+            }
+
+            scheduler = DomainSDNCTRLMLEdge(
+                domains,
+                ema_alpha=0.3
+            )
+
+            network_metrics = {
+                "throughput": throughput,
+                "latency": latency
+            }
+
+            assignment = {}
+
+            info(
+                "*** SDN_CTRLML-Edge - Edge 1\n"
+            )
+
+            edge1_flows = {
+                "ryu1": controller_flows["ryu1"],
+                "ryu2": controller_flows["ryu2"]
+            }
+
+            for switch_name in [
+                "s1",
+                "s2",
+                "s3"
+            ]:
+
+                controller_name, result = (
+                    scheduler.select_controller(
+                        "edge1",
+                        network_metrics=network_metrics,
+                        controller_flows=edge1_flows
+                    )
+                )
+
+                assignment[switch_name] = controller_name
+
+                edge1_flows[controller_name] += (
+                    flow_counts.get(switch_name, 0)
+                )
+
+                info(
+                    "    %s -> %s\n"
+                    % (
+                        switch_name,
+                        controller_name
+                    )
+                )
+
+            info(
+                "*** SDN_CTRLML-Edge - Edge 2\n"
+            )
+
+            edge2_flows = {
+                "ryu3": controller_flows["ryu3"],
+                "ryu4": controller_flows["ryu4"]
+            }
+
+            for switch_name in [
+                "s4",
+                "s5",
+                "s6"
+            ]:
+
+                controller_name, result = (
+                    scheduler.select_controller(
+                        "edge2",
+                        network_metrics=network_metrics,
+                        controller_flows=edge2_flows
+                    )
+                )
+
+                assignment[switch_name] = controller_name
+
+                edge2_flows[controller_name] += (
+                    flow_counts.get(switch_name, 0)
+                )
+
+                info(
+                    "    %s -> %s\n"
+                    % (
+                        switch_name,
+                        controller_name
+                    )
+                )
+
+            info(
+                "*** Affectation SDN_CTRLML-Edge terminee.\n"
+            )
+
+        else:
+
+            raise ValueError(
+                "Strategie inconnue : %s" % strategy
+            )
+
+
+        # ====================================================
+        # APPLICATION DE L'AFFECTATION
+        # ====================================================
+
+        info("\n")
+        info("*** Affectation finale des switches\n")
+
+        for switch_name, controller_name in assignment.items():
+
+            info(
+                "    %s -> %s\n"
+                % (
+                    switch_name,
+                    controller_name
+                )
+            )
+
+
+        # ----------------------------------------------------
+        # Réaffectation des contrôleurs OpenFlow
+        # ----------------------------------------------------
+
+        info("*** Réaffectation des contrôleurs OpenFlow\n")
+
+        controller_ports = {
+            "ryu1": 6653,
+            "ryu2": 6654,
+            "ryu3": 6655,
+            "ryu4": 6656
+        }
+
+        for switch_name, controller_name in assignment.items():
+
+            port = controller_ports[controller_name]
+            switch = net.get(switch_name)
+            controller = controllers[controller_name]
+
+            bridge_check = subprocess.run(
+                ["ovs-vsctl", "br-exists", switch_name],
+                capture_output=True,
+                text=True
+            )
+
+            if bridge_check.returncode != 0:
+
+                info(
+                    "    %s absent d'OVS -> recréation avec %s\n"
+                    % (switch_name, controller_name)
+                )
+
+                switch.start([controller])
+                time.sleep(1)
+
+            else:
+
+                cmd = [
+                    "ovs-vsctl",
+                    "set-controller",
+                    switch_name,
+                    "tcp:127.0.0.1:%d" % port
+                ]
+
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True
+                )
+
+                if result.returncode != 0:
+                    raise RuntimeError(
+                        "Erreur réaffectation %s -> %s : %s"
+                        % (
+                            switch_name,
+                            controller_name,
+                            result.stderr.strip()
+                        )
+                    )
+
+            info(
+                "    %s -> %s:%d\n"
+                % (
+                    switch_name,
+                    controller_name,
+                    port
+                )
+            )
+
+        time.sleep(5)
+
+     
+    # ========================================================
+    # WARM-UP DE LA CONNECTIVITE
+    # ========================================================
+
+    info("\n")
+    info("*** Verification de la connectivite avant experimentation\n")
+
+    time.sleep(3)
+
+    h1 = net.get("h1")
+    h12 = net.get("h12")
+
+    warmup = h1.cmd(
+        "ping -c 3 -W 1 %s"
+        % h12.IP()
+    )
+
+    info(
+        "*** Warm-up h1 -> h12 : %s\n"
+        % warmup.splitlines()[-1]
+    )
+
+    time.sleep(2)
+
+    # ========================================================
+    # AFFICHAGE DE LA TOPOLOGIE
+    # ========================================================
+
+    info("\n")
+    info("====================================================\n")
+    info(" TOPOLOGIE CLOUD-EDGE\n")
+    info("====================================================\n")
+
+    info("Edge 1 : s1 - s2 - s3\n")
+    info("Edge 2 : s4 - s5 - s6\n")
+    info("Interconnexion : s3 - s4\n")
+
+    info("\n")
+    info("Hotes Edge 1 : h1 - h6\n")
+    info("Hotes Edge 2 : h7 - h12\n")
+
+    info("\n")
+
+
+    # ========================================================
+    # EXPERIMENTATION ONOS
+    # ========================================================
+
+    if (
+        strategy == "onos_static"
+        and os.environ.get("RUN_EXPERIMENT") == "onos_static"
+    ):
+
+        info("\n")
+        info("====================================================\n")
+        info(" LANCEMENT DE L'EXPERIMENTATION ONOS MONO-INSTANCE\n")
+        info("====================================================\n")
+
+        from monitoring.experiment_onos_static import run_all
+
+        run_all(
+            net,
+            repetitions=10
+        )
+
+        experiment_executed = True
+
+        info("\n")
+        info("*** Experimentation ONOS terminee.\n")
+
+
+    # ========================================================
+    # EXPERIMENTATION ROUND ROBIN
+    # ========================================================
+
+    if (
+        strategy == "round_robin"
+        and os.environ.get("RUN_EXPERIMENT") == "round_robin"
+    ):
+
+        info("\n")
+        info("====================================================\n")
+        info(" LANCEMENT DE L'EXPERIMENTATION ROUND ROBIN\n")
+        info("====================================================\n")
+
+        from monitoring.experiment_round_robin import run_all
+
+        run_all(
+            net,
+            repetitions=10
+        )
+
+        experiment_executed = True
+
+        info("\n")
+        info("*** Experimentation Round Robin terminee.\n")
+
+
+    # ========================================================
+    # EXPERIMENTATION SDN CTRLML
+    # ========================================================
+
+    if (
+        strategy == "sdn_ctrlml_edge"
+        and os.environ.get("RUN_EXPERIMENT") == "sdn_ctrlml_edge"
+    ):
+
+        info("\\n")
+        info("====================================================\\n")
+        info(" LANCEMENT DE L'EXPERIMENTATION SDN_CTRLML-EDGE\\n")
+        info("====================================================\\n")
+
+        from monitoring.experiment_round_robin import run_all
+
+        run_all(
+            net,
+            repetitions=10,
+            strategy="sdn_ctrlml_edge",
+            output="results_sdn_ctrlml_edge.csv"
+        )
+
+        experiment_executed = True
+
+        info("\\n")
+        info("*** Experimentation SDN_CTRLML-Edge terminee.\\n")
+
+    if (
+        strategy == "sdn_ctrlml"
+        and os.environ.get("RUN_EXPERIMENT") == "sdn_ctrlml"
+    ):
+
+        info("\n")
+        info("====================================================\n")
+        info(" LANCEMENT DE L'EXPERIMENTATION SDN_CTRLML\n")
+        info("====================================================\n")
+
+        from monitoring.experiment_round_robin import run_all
+
+        run_all(
+            net,
+            repetitions=10,
+            strategy="sdn_ctrlml",
+            output="results_sdn_ctrlml.csv"
+        )
+
+        experiment_executed = True
+
+        info("\n")
+        info("*** Experimentation SDN_CTRLML terminee.\n")
+
+
+    # ========================================================
+    # TEST AUTOMATISE DE CHARGE DES CONTROLEURS
+    # ========================================================
+       
+    if os.environ.get("AUTOMATED_WORKLOAD") == "1":
+
+        info("\n")
+        info("====================================================\n")
+        info(" TEST AUTOMATISE DE CHARGE DES CONTROLEURS\n")
+        info("====================================================\n")
+
+        from monitoring.controller_workload_monitor import (
+            ControllerWorkloadMonitor
+        )
+
+        from traffic.generate_traffic import (
+            run_high_demand_test
+        )
+
+        monitor = ControllerWorkloadMonitor(
+            [
+                "ryu1",
+                "ryu2",
+                "ryu3",
+                "ryu4"
+            ]
+        )
+
+        # ----------------------------------------------------
+        # Fonction de génération de la forte demande
+        # ----------------------------------------------------
+
+        def generate_controller_traffic():
+
+            run_high_demand_test(
+                net,
+                duration=20,
+                interval=0.05
+            )
+
+        # ----------------------------------------------------
+        # Mesure synchronisée avec le trafic
+        # ----------------------------------------------------
+
+        rates = monitor.measure_during_workload(
+            generate_controller_traffic,
+            duration=20
+        )
+
+        # ----------------------------------------------------
+        # Affichage des résultats
+        # ----------------------------------------------------
+
+
+        info("\n")
+        info("*** Test de charge termine.\n")
+
+        experiment_executed = True
+       
+    # ========================================================
+    # MODE INTERACTIF NORMAL
+    # ========================================================
+
+    if not experiment_executed:
+
+        info("\n")
+        info("====================================================\n")
+        info(" TOPOLOGIE PRETE\n")
+        info("====================================================\n")
+        info("*** Vous pouvez maintenant utiliser la CLI Mininet.\n")
+        info("*** Exemple : pingall\n")
+        info("*** Exemple : nodes\n")
+        info("*** Exemple : net\n")
+        info("*** Exemple : links\n")
+        info("====================================================\n")
+
+        CLI(net)
+
+
+    # ========================================================
+    # ARRET DU RESEAU
+    # ========================================================
+
+    info("\n")
+    info("*** Arret du reseau...\n")
+
+    net.stop()
+
+
+# ============================================================
+# PROGRAMME PRINCIPAL
+# ============================================================
+
+if __name__ == "__main__":
+
+    setLogLevel("info")
+
+    create_topology()

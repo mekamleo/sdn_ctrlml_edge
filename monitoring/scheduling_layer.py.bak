@@ -1,0 +1,193 @@
+#!/usr/bin/env python3
+
+from monitoring.controller_workload_monitor import (
+    ControllerWorkloadMonitor
+)
+
+from monitoring.controller_clustering import (
+    ControllerClustering
+)
+
+
+class SchedulingLayer:
+
+    def __init__(
+        self,
+        controllers,
+        n_clusters=2
+    ):
+
+        if not controllers:
+            raise ValueError(
+                "Aucun controleur defini."
+            )
+
+        self.controllers = controllers
+
+        self.monitor = ControllerWorkloadMonitor(
+            controllers
+        )
+
+        self.clustering = ControllerClustering(
+            n_clusters=n_clusters
+        )
+
+    def get_controller_loads(self):
+
+        workloads = self.monitor.get_all_workloads()
+
+        return {
+            controller: float(workload["cpu"])
+            for controller, workload in workloads.items()
+        }
+
+    def cluster_controllers(
+        self,
+        controller_loads
+    ):
+
+        return self.clustering.cluster(
+            controller_loads
+        )
+
+    def select_controller(
+        self,
+        controller_loads,
+        clustering_result
+    ):
+
+        if not controller_loads:
+            raise ValueError(
+                "Aucune charge disponible."
+            )
+
+        clusters = clustering_result[
+            "clusters"
+        ]
+
+        centers = clustering_result[
+            "centers"
+        ]
+
+        # ----------------------------------------------------
+        # Sélection du cluster ayant le centre de charge
+        # le plus faible.
+        # ----------------------------------------------------
+
+        best_cluster = min(
+            range(len(centers)),
+            key=lambda cluster_id:
+                centers[cluster_id]
+        )
+
+        candidates = clusters[
+            best_cluster
+        ]
+
+        # ----------------------------------------------------
+        # Parmi les contrôleurs du cluster sélectionné,
+        # choisir celui ayant la charge minimale.
+        # ----------------------------------------------------
+
+        selected = min(
+            candidates,
+            key=lambda controller:
+                controller_loads[controller]
+        )
+
+        return selected
+
+    def schedule(self):
+
+        loads = self.get_controller_loads()
+
+        clustering_result = self.cluster_controllers(
+            loads
+        )
+
+        selected_controller = self.select_controller(
+            loads,
+            clustering_result
+        )
+
+        return {
+            "loads": loads,
+
+            "clustering":
+                clustering_result,
+
+            "selected_controller":
+                selected_controller
+        }
+
+
+if __name__ == "__main__":
+
+    controllers = [
+        "ryu1",
+        "ryu2",
+        "ryu3",
+        "ryu4"
+    ]
+
+    scheduler = SchedulingLayer(
+        controllers,
+        n_clusters=2
+    )
+
+    result = scheduler.schedule()
+
+    print(
+        "========== SDN CTRLML SCHEDULING LAYER =========="
+    )
+
+    print("\nCharges CPU :")
+
+    for controller, load in result[
+        "loads"
+    ].items():
+
+        print(
+            "  %s -> %.2f %%"
+            % (
+                controller,
+                load
+            )
+        )
+
+    print("\nClusters :")
+
+    for cluster_id, controllers_cluster in result[
+        "clustering"
+    ]["clusters"].items():
+
+        print(
+            "  Cluster %d -> %s"
+            % (
+                cluster_id,
+                ", ".join(
+                    controllers_cluster
+                )
+            )
+        )
+
+    print("\nCentres :")
+
+    for cluster_id, center in enumerate(
+        result["clustering"]["centers"]
+    ):
+
+        print(
+            "  Cluster %d -> %.2f %%"
+            % (
+                cluster_id,
+                center
+            )
+        )
+
+    print(
+        "\nContrôleur sélectionné -> %s"
+        % result[
+            "selected_controller"
+        ]
+    )

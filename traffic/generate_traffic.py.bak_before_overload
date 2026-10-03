@@ -1,0 +1,494 @@
+#!/usr/bin/env python3
+
+import os
+import sys
+import time
+from threading import Thread
+
+sys.path.append(
+    os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..")
+    )
+)
+
+from strategies.round_robin import DomainRoundRobin
+
+
+def ping_traffic(net, source, destination, count=20):
+    """
+    Génère du trafic ICMP entre deux hôtes Mininet.
+    """
+
+    src = net.get(source)
+    dst = net.get(destination)
+
+    print(f"[PING] {source} -> {destination}")
+
+    result = src.cmd(
+        f"ping -c {count} {dst.IP()}"
+    )
+
+    print(result)
+
+    return result
+
+
+def iperf_server(net, host, port=5001):
+    """
+    Démarre un serveur iperf sur un hôte.
+    """
+
+    node = net.get(host)
+
+    print(
+        f"[IPERF SERVER] Démarrage sur "
+        f"{host}:{port}"
+    )
+
+    node.cmd(
+        f"iperf -s -p {port} "
+        f"> /tmp/iperf_{host}.log 2>&1 &"
+    )
+
+
+def iperf_traffic(
+    net,
+    source,
+    destination,
+    duration=20,
+    bandwidth=None,
+    port=5001
+):
+    """
+    Génère un flux TCP avec iperf.
+    """
+
+    src = net.get(source)
+    dst = net.get(destination)
+
+    iperf_server(
+        net,
+        destination,
+        port
+    )
+
+    time.sleep(1)
+
+    command = (
+        f"iperf -c {dst.IP()} "
+        f"-p {port} "
+        f"-t {duration}"
+    )
+
+    if bandwidth is not None:
+        command += f" -b {bandwidth}"
+
+    print(
+        f"[IPERF] {source} -> {destination} "
+        f"pendant {duration} secondes"
+    )
+
+    result = src.cmd(command)
+
+    print(result)
+
+    return result
+
+
+def concurrent_traffic(net, flows):
+    """
+    Lance plusieurs flux simultanément.
+
+    Format d'un flux :
+
+    {
+        "type": "ping" ou "iperf",
+        "source": "h1",
+        "destination": "h7",
+        "duration": 20
+    }
+    """
+
+    threads = []
+
+    for flow in flows:
+
+        if flow["type"] == "ping":
+
+            thread = Thread(
+                target=ping_traffic,
+                args=(
+                    net,
+                    flow["source"],
+                    flow["destination"],
+                    flow.get("count", 20)
+                )
+            )
+
+        elif flow["type"] == "iperf":
+
+            thread = Thread(
+                target=iperf_traffic,
+                args=(
+                    net,
+                    flow["source"],
+                    flow["destination"],
+                    flow.get("duration", 20),
+                    flow.get("bandwidth"),
+                    flow.get("port", 5001)
+                )
+            )
+
+        else:
+
+            print(
+                f"[WARNING] Type de trafic inconnu : "
+                f"{flow['type']}"
+            )
+
+            continue
+
+        threads.append(thread)
+        thread.start()
+
+    for thread in threads:
+        thread.join()
+
+    print(
+        "[TRAFFIC] Tous les flux sont terminés"
+    )
+
+
+def run_flow_churn(
+    net,
+    duration=10,
+    interval=0.05
+):
+    """
+    Génère continuellement de nouveaux flux
+    afin d'augmenter les événements Packet-In.
+    """
+
+    flows = [
+        ("h1", "h2"),
+        ("h1", "h3"),
+        ("h1", "h4"),
+        ("h1", "h5"),
+        ("h1", "h6"),
+        ("h2", "h5"),
+        ("h2", "h6"),
+        ("h2", "h7"),
+        ("h2", "h8"),
+        ("h3", "h7"),
+        ("h3", "h8"),
+        ("h3", "h9"),
+        ("h3", "h10"),
+        ("h4", "h9"),
+        ("h4", "h10"),
+        ("h4", "h11"),
+        ("h4", "h12"),
+        ("h5", "h11"),
+        ("h5", "h12"),
+        ("h6", "h7"),
+        ("h6", "h8"),
+        ("h7", "h9"),
+        ("h7", "h10"),
+        ("h8", "h11"),
+        ("h8", "h12"),
+        ("h9", "h11"),
+        ("h9", "h12"),
+        ("h10", "h1"),
+        ("h10", "h2"),
+        ("h11", "h3"),
+        ("h11", "h4"),
+        ("h12", "h5"),
+        ("h12", "h6")
+    ]
+
+    print("\n========== FLOW CHURN ==========")
+    print(f"Durée   : {duration} s")
+    print(f"Intervalle : {interval} s")
+    print(f"Débit théorique : {1 / interval:.1f} nouveaux flux/s")
+
+    start_time = time.time()
+    index = 0
+
+    while time.time() - start_time < duration:
+
+        source_name, destination_name = flows[
+            index % len(flows)
+        ]
+
+        source = net.get(source_name)
+        destination = net.get(destination_name)
+
+        source.cmd(
+            f"ping -c 1 -W 1 "
+            f"{destination.IP()} "
+            "> /dev/null 2>&1"
+        )
+
+        index += 1
+
+        time.sleep(interval)
+
+    elapsed = time.time() - start_time
+
+    print(
+        f"Flux générés : {index}"
+    )
+    print(
+        f"Débit réel approximatif : "
+        f"{index / elapsed:.1f} flux/s"
+    )
+
+    print("========== FIN FLOW CHURN ==========\n")
+
+
+def run_test_scenario(net):
+    """
+    Scénario de test initial pour
+    l'architecture Cloud-Edge.
+    """
+
+    print(
+        "\n========== SCÉNARIO DE TRAFIC =========="
+    )
+
+    scheduler = DomainRoundRobin(
+        {
+            "edge1": ["ryu1", "ryu2"],
+            "edge2": ["ryu3", "ryu4"]
+        }
+    )
+
+    print(
+        "\n========== ROUND ROBIN =========="
+    )
+
+    for i in range(4):
+
+        if i < 2:
+            domain = "edge1"
+        else:
+            domain = "edge2"
+
+        controller = scheduler.select_controller(
+            domain
+        )
+
+        print(
+            f"Flux {i + 1} -> "
+            f"{domain} -> {controller}"
+        )
+
+    print(
+        "=================================\n"
+    )
+
+    flows = [
+
+        {
+            "type": "ping",
+            "source": "h1",
+            "destination": "h7",
+            "count": 20
+        },
+
+        {
+            "type": "ping",
+            "source": "h3",
+            "destination": "h9",
+            "count": 20
+        },
+
+        {
+            "type": "iperf",
+            "source": "h2",
+            "destination": "h8",
+            "duration": 30,
+            "bandwidth": "5M",
+            "port": 5001
+        },
+
+        {
+            "type": "iperf",
+            "source": "h4",
+            "destination": "h10",
+            "duration": 30,
+            "bandwidth": "5M",
+            "port": 5002
+        }
+
+    ]
+
+    concurrent_traffic(
+        net,
+        flows
+    )
+
+    print(
+        "\n========== FLOW CHURN TEST =========="
+    )
+
+    run_flow_churn(
+        net,
+        duration=10,
+        interval=0.5
+    )
+
+    print(
+        "========== FIN DU SCÉNARIO ==========\n"
+    )
+
+def run_transient_overload(net):
+    """
+    Scénario C :
+    surcharge transitoire du réseau Cloud-Edge.
+
+    Phases :
+      1. Charge normale
+      2. Montée en charge
+      3. Pic de surcharge
+      4. Retour progressif
+      5. Charge normale
+
+    Le trafic est généré simultanément depuis plusieurs hôtes.
+    """
+
+    import threading
+    import time
+
+    print("\n")
+    print("============================================================")
+    print(" SCENARIO C - SURCHARGE TRANSITOIRE")
+    print("============================================================")
+
+    # Couples source/destination répartis sur les deux domaines
+    flows = [
+        ("h1", "h7"),
+        ("h1", "h8"),
+        ("h2", "h7"),
+        ("h2", "h9"),
+        ("h3", "h8"),
+        ("h3", "h10"),
+        ("h4", "h9"),
+        ("h4", "h11"),
+        ("h5", "h10"),
+        ("h5", "h12"),
+        ("h6", "h11"),
+        ("h6", "h12"),
+
+        ("h7", "h1"),
+        ("h7", "h2"),
+        ("h8", "h3"),
+        ("h8", "h4"),
+        ("h9", "h5"),
+        ("h9", "h6"),
+        ("h10", "h1"),
+        ("h10", "h3"),
+        ("h11", "h2"),
+        ("h11", "h4"),
+        ("h12", "h5"),
+        ("h12", "h6"),
+    ]
+
+    def traffic_worker(source_name, destination_name, duration, interval):
+        source = net.get(source_name)
+        destination = net.get(destination_name)
+
+        end_time = time.time() + duration
+        sent = 0
+
+        while time.time() < end_time:
+
+            source.cmd(
+                f"ping -c 1 -W 1 "
+                f"{destination.IP()} > /dev/null 2>&1"
+            )
+
+            sent += 1
+
+            if interval > 0:
+                time.sleep(interval)
+
+        return sent
+
+    def run_phase(name, duration, interval):
+
+        print("\n------------------------------------------------------------")
+        print(f" PHASE : {name}")
+        print(f" Durée : {duration}s")
+        print(f" Intervalle : {interval}s")
+        print("------------------------------------------------------------")
+
+        threads = []
+
+        for source, destination in flows:
+
+            thread = threading.Thread(
+                target=traffic_worker,
+                args=(source, destination, duration, interval)
+            )
+
+            thread.start()
+            threads.append(thread)
+
+        for thread in threads:
+            thread.join()
+
+        print(f" FIN PHASE : {name}")
+
+    # =========================================================
+    # PHASE 1 : CHARGE NORMALE
+    # =========================================================
+
+    run_phase(
+        "CHARGE NORMALE",
+        duration=10,
+        interval=0.20
+    )
+
+    # =========================================================
+    # PHASE 2 : MONTEE EN CHARGE
+    # =========================================================
+
+    run_phase(
+        "MONTEE EN CHARGE",
+        duration=10,
+        interval=0.05
+    )
+
+    # =========================================================
+    # PHASE 3 : PIC DE SURCHARGE
+    # =========================================================
+
+    run_phase(
+        "PIC DE SURCHARGE",
+        duration=10,
+        interval=0.01
+    )
+
+    # =========================================================
+    # PHASE 4 : RETOUR PROGRESSIF
+    # =========================================================
+
+    run_phase(
+        "RETOUR PROGRESSIF",
+        duration=10,
+        interval=0.05
+    )
+
+    # =========================================================
+    # PHASE 5 : CHARGE NORMALE
+    # =========================================================
+
+    run_phase(
+        "RETOUR A LA CHARGE NORMALE",
+        duration=10,
+        interval=0.20
+    )
+
+    print("\n============================================================")
+    print(" FIN SCENARIO C - SURCHARGE TRANSITOIRE")
+    print("============================================================\n")

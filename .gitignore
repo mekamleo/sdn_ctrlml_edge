@@ -1,0 +1,20 @@
+# Données volumineuses
+dataset/
+backups/
+results_*.csv
+results_*.txt
+
+# Docker
+docker/volumes/
+*.tar
+*.tar.gz
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env/
+venv/
+
+# Logs
+*.log
